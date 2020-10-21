@@ -9,5 +9,7 @@ install:
 script:
   - yarn test
 
+after_script: npm codecov@3
+
 branches:
   only: master
