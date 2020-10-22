@@ -1,8 +1,28 @@
 import React from 'react'
-import { fireEvent, render } from '@testing-library/react'
+
+import { fireEvent, render, waitFor } from '@testing-library/react'
+import user from '@testing-library/user-event'
+import { getByRole, getQueriesForElement } from '@testing-library/dom'
 
 import { getAdults } from '../matchSnapshot'
 import ToHaveTextContent from '../toHaveTextContent'
+import InputLabel from '../inputLabel'
+import InputValidation from '../InputValidation'
+import TestAPI from '../testAPI'
+import ErrorBoundary from '../ErrorBoundary'
+import { renderUI, getAPIData } from '../../test/utils'
+
+jest.mock('../../test/utils') // All the functions which are exported in the specified module will be mocked
+// const jestMock = jest.fn() // Instead of mocking entire module, we can mock specific function by this.
+
+// afterEach : This is one of the Lifecycle method of jest which runs after each one of the tests in this file completes.
+afterEach(() => jest.clearAllMocks()) // Clears the properties of all mocks so that no conflict can occur if one mock function is used in multiple test cases.
+
+// beforeAll : This is one of the Lifecycle method of jest which runs before running any of the tests in this file
+beforeAll(() => jest.spyOn(console, 'error').mockImplementation(() => {})) // When console.error is called, jest will call the callback function passed to the 'mockImplementation' function which does nothing. So that error wont be displayed in the console.
+
+// afterAll : This is one of the Lifecycle method of jest which runs after executing all of the tests in this file
+afterAll(() => console.error.mockRestore()) // It restores the console.error to it's original implementation
 
 test('matchSnapshot', () => {
   const adults = getAdults() // Pretend this data is fetched from API.
@@ -71,7 +91,7 @@ test('matchSnapshot', () => {
 test('toHaveTextContent', () => {
   const { getByText } = render(<ToHaveTextContent />)
   const submitButton = getByText('Submit')
-  debugger
+  // debugger
   fireEvent.click(submitButton)
 
   // expect(submitButton.textContent).toBe('Submit')
@@ -83,3 +103,66 @@ test('toHaveTextContent', () => {
    */
   expect(submitButton).toHaveTextContent('Submit')
 })
+
+test('inputLabel', () => {
+  // const { getByLabelText } = renderUI(<InputLabel />) // Custom utility function method.
+  const { getByLabelText, debug } = render(<InputLabel />)
+  const inputLabel = getByLabelText('Test Label')
+  // const inputLabel = queries.getByLabelText(div, /Test Label/i)  // Ignore Casing
+  expect(inputLabel).toHaveAttribute('type', 'number')
+  // debug()  // Debug during tests
+})
+
+test('inputValidation', () => {
+  const { container, getByRole, rerender, queryByRole } = render(
+    <InputValidation />
+  )
+  const inputControl = container.querySelector('input')
+  // fireEvent.change(inputControl, { target: { value: '-10' } }) // Change event
+  user.type(inputControl, '-1')
+  // rerender(<InputValidation value={20} />)  // When you need to rerender the component with different props
+  expect(getByRole('error')).toHaveTextContent('Invalid value') // getByRole : get the element by role, if the element does not exists, it will throw error
+  // expect(queryByRole('error')).toBeNull() // queryByRole : same as getByRole except that it will not throw error. So that we can use this to check whether the element is preset or not.
+})
+
+test('testAPI', async () => {
+  const mockAPIResponse = 'TEST_USER'
+  getAPIData.mockResolvedValueOnce({ data: { UserName: mockAPIResponse } })
+  const { getByLabelText, getByText } = render(<TestAPI />)
+  const inputControl = getByLabelText(/name/i)
+  const buttonControl = getByText('Submit')
+  fireEvent.click(buttonControl)
+  expect(getAPIData).toHaveBeenCalledWith(
+    'https://jsonplaceholder.typicode.com/todos/1'
+  )
+  expect(getAPIData).toHaveBeenCalledTimes(1)
+  await waitFor(() =>
+    expect(getByLabelText('sample-label')).toHaveTextContent(mockAPIResponse)
+  )
+})
+
+test('ErrorBoundary', () => {
+  getAPIData.mockResolvedValueOnce({ data: { result: 'SUCCESS' } })
+  const { rerender } = render(
+    <ErrorBoundary>
+      <ErrorComponent throwError />
+    </ErrorBoundary>
+  )
+
+  expect.any(Error)
+  expect(getAPIData).toHaveBeenCalledWith(
+    'https://jsonplaceholder.typicode.com/errors'
+  )
+  expect(getAPIData).toHaveBeenCalledTimes(1)
+
+  /* Even though we have handled for any error occurences in ErrorBoundary's componentDidCatch method, 
+  the error will be thrown from both jest and React. So in order to handle this, we expect, there will be two console error and those 
+  errors will be cleared before running any of the tests in this file using beforeAll lifecycle method. So with the below code,
+  we ensure that console.error does not mess up with the other console error in the any of the test cases */
+  expect(console.error).toHaveBeenCalledTimes(2)
+})
+
+function ErrorComponent({ throwError }) {
+  if (throwError) throw new Error('Test Error')
+  return null
+}
