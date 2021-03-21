@@ -7,7 +7,7 @@ install:
   - yarn install
 
 script:
-  - yarn test
+  - yarn setup
 
 after_script: npm codecov@3
 

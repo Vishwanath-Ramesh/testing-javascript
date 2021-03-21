@@ -1,8 +1,12 @@
 import React from 'react'
-
+import { Redirect } from 'react-router'
+import { Router } from 'react-router-dom'
+import { createMemoryHistory } from 'history'
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import user from '@testing-library/user-event'
 import { getByRole, getQueriesForElement } from '@testing-library/dom'
+import { renderHook, act } from '@testing-library/react-hooks'
+import { build, fake, sequence } from 'test-data-bot'
 
 import { getAdults } from '../matchSnapshot'
 import ToHaveTextContent from '../toHaveTextContent'
@@ -10,10 +14,20 @@ import InputLabel from '../inputLabel'
 import InputValidation from '../InputValidation'
 import TestAPI from '../testAPI'
 import ErrorBoundary from '../ErrorBoundary'
+import FormRedirect from '../FormRedirect'
+import ReactRoutes from '../ReactRoutes'
+import { useCounter } from '../useCounter'
+import TestUnmount from '../TestUnmount'
 import { renderUI, getAPIData } from '../../test/utils'
 
 jest.mock('../../test/utils') // All the functions which are exported in the specified module will be mocked
 // const jestMock = jest.fn() // Instead of mocking entire module, we can mock specific function by this.
+
+jest.mock('react-router', () => {
+  return {
+    Redirect: jest.fn(() => null),
+  }
+})
 
 // afterEach : This is one of the Lifecycle method of jest which runs after each one of the tests in this file completes.
 afterEach(() => jest.clearAllMocks()) // Clears the properties of all mocks so that no conflict can occur if one mock function is used in multiple test cases.
@@ -22,7 +36,10 @@ afterEach(() => jest.clearAllMocks()) // Clears the properties of all mocks so t
 beforeAll(() => jest.spyOn(console, 'error').mockImplementation(() => {})) // When console.error is called, jest will call the callback function passed to the 'mockImplementation' function which does nothing. So that error wont be displayed in the console.
 
 // afterAll : This is one of the Lifecycle method of jest which runs after executing all of the tests in this file
-afterAll(() => console.error.mockRestore()) // It restores the console.error to it's original implementation
+afterAll(() => {
+  console.error.mockRestore() // It restores the console.error to it's original implementation
+  jest.useRealTimers() // If we are faking timers in any of the test case, we have restore to use real timers.
+})
 
 test('matchSnapshot', () => {
   const adults = getAdults() // Pretend this data is fetched from API.
@@ -143,11 +160,13 @@ test('testAPI', async () => {
 
 test('ErrorBoundary', () => {
   getAPIData.mockResolvedValueOnce({ data: { result: 'SUCCESS' } })
-  const { rerender } = render(
+  render(
     <ErrorBoundary>
       <ErrorComponent throwError />
     </ErrorBoundary>
   )
+
+  // render(<ErrorComponent throwError />, { wrapper: ErrorBoundary }) // The above statement can also be written as like this, so that we dont have to nest the components whenver we using rerender
 
   expect.any(Error)
   expect(getAPIData).toHaveBeenCalledWith(
@@ -162,7 +181,119 @@ test('ErrorBoundary', () => {
   expect(console.error).toHaveBeenCalledTimes(2)
 })
 
+/* Instead of giving the harcoded values for test cases, we can generate the values randomly, so that test suites can be executed 
+   with different values and fix the isses if there is one.  */
+const postDataBuilder = build('Post').fields({
+  name: fake((f) => f.lorem.words()),
+  age: fake((f) => `${f.random.number({ min: 1, max: 100 })}`),
+})
+
+test('FormRedirect', async () => {
+  getAPIData.mockResolvedValueOnce()
+
+  const fakePost = {
+    ...postDataBuilder(),
+    date: expect.any(String),
+  }
+  const preDate = new Date().getTime()
+  const { getByLabelText, getByText } = render(<FormRedirect />)
+  getByLabelText('Name').value = fakePost.name
+  getByLabelText('Age').value = fakePost.age
+  const submitButton = getByText('Submit')
+
+  fireEvent.click(submitButton)
+  expect(submitButton).toBeDisabled()
+  expect(getAPIData).toHaveBeenCalledWith(
+    'https://jsonplaceholder.typicode.com/errors',
+    fakePost
+  )
+  expect(getAPIData).toHaveBeenCalledTimes(1)
+  const postDate = new Date().getTime()
+  const date = new Date(getAPIData.mock.calls[0][1].date).getTime()
+  expect(date).toBeGreaterThanOrEqual(preDate)
+  expect(date).toBeLessThanOrEqual(postDate)
+
+  await waitFor(() => expect(Redirect).toHaveBeenCalledWith({ to: '/' }, {}))
+})
+
+// ToDo : Need to look after sometime
+// test('ReactRoutes - Check for route navigation', () => {
+//   const history = createMemoryHistory({ initialEntries: ['/'] })
+//   const { getByLabelText, getByText, debug } = render(
+//     <Router history={history}>
+//       <ReactRoutes />
+//     </Router>
+//   )
+//   debug()
+// })
+
+test('Counter - Testing custom hook with no initial value', () => {
+  // const result = renderCustomHook({ initialProps: {} }) // Instead using custom functions, we can also use the in-built function(below code) to render react custom hooks
+  const { result } = renderHook(useCounter)
+  expect(result.current.count).toBe(0)
+  result.current.increment()
+  expect(result.current.count).toBe(1)
+  result.current.decrement()
+  expect(result.current.count).toBe(0)
+})
+
+test('Counter - Testing custom hook with providing initialCount value', () => {
+  // const result = renderCustomHook({ initialProps: { initialCount: 2 } }) // Instead using custom functions, we can also use the in-built function(below code) to render react custom hooks
+  const { result } = renderHook(useCounter, {
+    initialProps: { initialCount: 2 },
+  })
+  expect(result.current.count).toBe(2)
+  result.current.increment()
+  expect(result.current.count).toBe(3)
+  result.current.decrement()
+  expect(result.current.count).toBe(2)
+})
+
+test('Counter - Testing custom hook with providing step value', () => {
+  // const result = renderCustomHook({ initialProps: { step: 2 } }) // Instead using custom functions, we can also use the in-built function(below code) to render react custom hooks
+  const { result } = renderHook(useCounter, { initialProps: { step: 2 } })
+  expect(result.current.count).toBe(0)
+  result.current.increment()
+  expect(result.current.count).toBe(2)
+  result.current.decrement()
+  expect(result.current.count).toBe(0)
+})
+
+test('Counter - Testing custom hook with providing step value and updating it', () => {
+  // const result = renderCustomHook({ initialProps: { step: 2 } }) // Instead using custom functions, we can also use the in-built function(below code) to render react custom hooks
+  const { result, rerender } = renderHook(useCounter, {
+    initialProps: { step: 2 },
+  })
+  expect(result.current.count).toBe(0)
+  result.current.increment()
+  expect(result.current.count).toBe(2)
+  rerender({ step: 1 })
+  result.current.decrement()
+  expect(result.current.count).toBe(1)
+})
+
 function ErrorComponent({ throwError }) {
   if (throwError) throw new Error('Test Error')
   return null
+}
+
+test('TestUnmount - Testing whether the cleanup is happening when the component is unmounting', () => {
+  jest.useFakeTimers() // Since we are using timers function(setInterval) in the component, so rather than waiting for the time to meet, we can use jest's inbuit functions to fake the timers.
+  const { unmount } = render(<TestUnmount />)
+  unmount()
+  jest.runOnlyPendingTimers() // It executes the tasks that have been queued by setTimeout() or setInterval() up to this point
+  expect(console.error).not.toHaveBeenCalled()
+})
+
+/* Instead of duplication the code, we can create a function and use it at different places */
+function renderCustomHook({ initialProps }) {
+  const result = {}
+
+  function TestComponent() {
+    result.current = useCounter({ ...initialProps })
+    return null
+  }
+  render(<TestComponent {...initialProps} />)
+
+  return result
 }
