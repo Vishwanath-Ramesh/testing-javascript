@@ -2,15 +2,20 @@ import React from 'react'
 import { Redirect } from 'react-router'
 import { Router } from 'react-router-dom'
 import { createMemoryHistory } from 'history'
-import { fireEvent, render, waitFor } from '@testing-library/react'
-import user from '@testing-library/user-event'
+import { fireEvent, render, waitFor, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { getByRole, getQueriesForElement } from '@testing-library/dom'
 import { renderHook, act } from '@testing-library/react-hooks'
 import { build, fake, sequence } from 'test-data-bot'
+import { build as builder, fake as faker } from '@jackfranklin/test-data-bot'
+import { rest } from 'msw'
+import { setupServer } from 'msw/node'
+// import faker from 'faker'
 
 import { getAdults } from '../matchSnapshot'
 import ToHaveTextContent from '../toHaveTextContent'
 import InputLabel from '../inputLabel'
+import Login from '../Login'
 import InputValidation from '../InputValidation'
 import TestAPI from '../testAPI'
 import ErrorBoundary from '../ErrorBoundary'
@@ -19,6 +24,11 @@ import ReactRoutes from '../ReactRoutes'
 import { useCounter } from '../useCounter'
 import TestUnmount from '../TestUnmount'
 import { renderUI, getAPIData } from '../../test/utils'
+import { handlers } from '../../test/server-handlers'
+import EasyButton from '../EasyButton'
+import { ThemeProvider } from '../useTheme'
+
+const server = setupServer(...handlers)
 
 jest.mock('../../test/utils') // All the functions which are exported in the specified module will be mocked
 // const jestMock = jest.fn() // Instead of mocking entire module, we can mock specific function by this.
@@ -30,15 +40,28 @@ jest.mock('react-router', () => {
 })
 
 // afterEach : This is one of the Lifecycle method of jest which runs after each one of the tests in this file completes.
-afterEach(() => jest.clearAllMocks()) // Clears the properties of all mocks so that no conflict can occur if one mock function is used in multiple test cases.
+afterEach(() => {
+  jest.clearAllMocks() // Clears the properties of all mocks so that no conflict can occur if one mock function is used in multiple test cases.
+  server.resetHandlers()
+})
+
+// beforeEach : This is one of the lifecycle method of jest which runs before running each of the test cases
+beforeEach(() => {
+  // document.body.innerHTML = ''
+  // ? If we are using react testing library(@testing-library/react), it(render method) will take care of all the cleanups, unmounting components for us.
+})
 
 // beforeAll : This is one of the Lifecycle method of jest which runs before running any of the tests in this file
-beforeAll(() => jest.spyOn(console, 'error').mockImplementation(() => {})) // When console.error is called, jest will call the callback function passed to the 'mockImplementation' function which does nothing. So that error wont be displayed in the console.
+beforeAll(() => {
+  jest.spyOn(console, 'error').mockImplementation(() => {}) // When console.error is called, jest will call the callback function passed to the 'mockImplementation' function which does nothing. So that error wont be displayed in the console.
+  server.listen() // listen to mock rest api calls for each tese cases
+})
 
 // afterAll : This is one of the Lifecycle method of jest which runs after executing all of the tests in this file
 afterAll(() => {
   console.error.mockRestore() // It restores the console.error to it's original implementation
   jest.useRealTimers() // If we are faking timers in any of the test case, we have restore to use real timers.
+  server.close()
 })
 
 test('matchSnapshot', () => {
@@ -106,18 +129,39 @@ test('matchSnapshot', () => {
 })
 
 test('toHaveTextContent', () => {
+  // * render : It creates a wrapping div, so that we dont have to create a new div and render the component in there. Also it performs cleanups by itself like unmounting the component, removing the wrapper div etc.
   const { getByText } = render(<ToHaveTextContent />)
+
+  // * The below command prints to test console, how will the screen looks like after rendering the particular component to the DOM. In our case, 'ToHaveTextContent'
+  // screen.debug()
+
   const submitButton = getByText('Submit')
-  // debugger
-  fireEvent.click(submitButton)
 
-  // expect(submitButton.textContent).toBe('Submit')
+  // * The above button can also be referenced by using 'screen' utils from rtl. This can be helpfull when we are acessing the elements from entire document body not specific to the rendering component in render method
+  // const submitButtonFromScreen = screen.getByRole('button', { name: /submit/i }) // gets the submit button by the 'Name' property of Accessibility of elements(WCAG) with case ignored
 
-  /* 
-  When the above test case fails, the error message is not clear. Also, instead of accessing the 'textContent' from the whole object,
-  we have a library called '@testing-library/jest-dom'. Having this library configured, we can check for the test cases with the below
-  method very easily.
+  // * Using '.click' works fine, but what if you wanted to fire an event that doesn't have a dedicated method (like mouseover). Rather using 'button.click()', use 'button.dispatchEvent'
+  // submitButton.click()
+
+  //   const mouseClickEvent = new MouseEvent('click', {
+  //     bubbles: true,
+  //     cancelable: true,
+  //     button: 0
+  //   })
+  // submitButton.dispatchEvent(mouseClickEvent)
+
+  // * The above click handler boilerplate can be eliminated by using fireevent from rtl.
+  // fireEvent.click(submitButton)
+
+  // * Instead of using 'fireEvent', we can use 'userEvent'. 'fireEvent' is specific to any type of events like 'click', 'hover' etc., whereas 'userEvent' is common to all type of user events. All type of user events(click, hover etc) can be made possible by using 'userEvent' alone.
+  userEvent.click(submitButton)
+
+  /*
+   * When the above test case fails, the error message is not clear. Also, instead of accessing the 'textContent' from the whole object,
+   * we have a library called '@testing-library/jest-dom'. Having this library configured, we can check for the test cases with the below
+   * method very easily.
    */
+  // expect(submitButton.textContent).toBe('Submit')
   expect(submitButton).toHaveTextContent('Submit')
 })
 
@@ -131,12 +175,13 @@ test('inputLabel', () => {
 })
 
 test('inputValidation', () => {
+  // container : render method creates a wrapping div, in that the supplied component gets rendered
   const { container, getByRole, rerender, queryByRole } = render(
     <InputValidation />
   )
   const inputControl = container.querySelector('input')
   // fireEvent.change(inputControl, { target: { value: '-10' } }) // Change event
-  user.type(inputControl, '-1')
+  userEvent.type(inputControl, '-1')
   // rerender(<InputValidation value={20} />)  // When you need to rerender the component with different props
   expect(getByRole('error')).toHaveTextContent('Invalid value') // getByRole : get the element by role, if the element does not exists, it will throw error
   // expect(queryByRole('error')).toBeNull() // queryByRole : same as getByRole except that it will not throw error. So that we can use this to check whether the element is preset or not.
@@ -297,3 +342,64 @@ function renderCustomHook({ initialProps }) {
 
   return result
 }
+
+function buildLogin() {
+  return {
+    username: faker.internet.userName(),
+    password: faker.internet.password(),
+  }
+}
+
+const buildLoginV2 = builder({
+  fields: {
+    username: faker((f) => f.internet.userName()),
+    password: faker((f) => f.internet.password()),
+  },
+})
+
+test('Login form submission', () => {
+  let inputData = null
+  const { username, password } = buildLoginV2() // buildLogin()
+
+  const onSubmitHandler = (submittedData) => (inputData = submittedData)
+  render(<Login onSubmit={onSubmitHandler} />)
+  userEvent.type(screen.getByLabelText(/username/i), username)
+  userEvent.type(screen.getByLabelText(/password/i), password)
+  userEvent.click(screen.getByRole('button', { name: /submit/i }))
+  expect(inputData).toEqual({
+    username,
+    password,
+  })
+
+  // * The above assertion can also be written as below
+  // const onSubmitHandler = jest.fn()
+  // expect(onSubmitHandler).toHaveBeenCalledWith({
+  //   username,
+  //   password,
+  // })
+  // expect(onSubmitHandler).toHaveBeenCalledTimes(1)
+})
+
+test('React context testing - renders with the light styles for the light theme', () => {
+  const Wrapper = ({ children }) => (
+    <ThemeProvider initialTheme={'light'}>{children}</ThemeProvider>
+  )
+  render(<EasyButton>Easy</EasyButton>, { wrapper: Wrapper })
+  const button = screen.getByRole('button', { name: /easy/i })
+  expect(button).toHaveStyle(`
+    background-color: white;
+    color: black;
+  `)
+})
+
+test('React context testing - renders with the dark styles for the dark theme', () => {
+  const Wrapper = ({ children }) => (
+    <ThemeProvider initialTheme={'dark'}>{children}</ThemeProvider>
+  )
+  render(<EasyButton>Easy</EasyButton>, { wrapper: Wrapper })
+  const button = screen.getByRole('button', { name: /easy/i })
+  expect(button).toHaveStyle(`
+    color: white;
+    background-color: black;
+  `)
+})

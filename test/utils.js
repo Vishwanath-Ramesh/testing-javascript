@@ -1,5 +1,6 @@
 import ReactDOM from 'react-dom'
 import { getQueriesForElement } from '@testing-library/dom'
+import faker from 'faker'
 
 /**
  * We can use this function to render the JSX component or use in-built render frunction from react testing library.
@@ -17,4 +18,11 @@ function getAPIData(url) {
   return fetch(url).then((response) => response.json())
 }
 
-export { renderUI, getAPIData }
+function buildLogin() {
+  return {
+    username: faker.internet.userName(),
+    password: faker.internet.password(),
+  }
+}
+
+export { renderUI, getAPIData, buildLogin }
